@@ -1,0 +1,44 @@
+resources:
+  - name: basic_aspnetcore_gitRepo
+    type: gitRepo
+    integration: dr_gh
+    versionTemplate:
+      sourceName: devops-recipes/basic_aspnetcore
+      branch: master
+
+  - name: basic_aspnetcore_image
+    type: image
+    integration: dr_dockerhub
+    versionTemplate:
+      sourceName: devopsrecipes/basic_aspnetcore
+      versionName: latest
+
+jobs:
+  - name: build_and_push
+    type: runSh
+    integrations:
+      - dr_dockerhub
+    steps:
+      - IN: basic_aspnetcore_gitRepo
+      - TASK:
+          runtime:
+            container: false
+            options:
+              env:
+                - RES_OUT_IMG: basic_aspnetcore_image
+          script:
+            - pushd $(shipctl get_resource_state basic_aspnetcore_gitRepo)
+            - $env:IMG_NAME=$(shipctl get_resource_version_key "$env:RES_OUT_IMG" "sourceName")
+            - echo "${env:IMG_NAME}:${env:BUILD_NUMBER}"
+            - docker build -t="${env:IMG_NAME}:${env:BUILD_NUMBER}" $(pwd)
+            - |
+               # Log in to Docker Hub
+               $DH_USR_NAME=$(shipctl get_integration_resource_field "$env:RES_OUT_IMG" "userName")
+               $DH_PASS=$(shipctl get_integration_resource_field "$env:RES_OUT_IMG" "password")
+               docker login -u $DH_USR_NAME -p $DH_PASS
+            - docker push "${env:IMG_NAME}:${env:BUILD_NUMBER}"
+      - OUT: basic_aspnetcore_image
+    on_success:
+      script:
+        # Update OUT resource to create a new version that will trigger rest of the workflow
+        - shipctl put_resource_state_multi "$env:RES_OUT_IMG" "versionName=$BUILD_NUMBER"
